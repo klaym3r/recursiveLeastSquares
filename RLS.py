@@ -9,7 +9,7 @@ class RLSMagCalibrator:
     Метод update(x,y,z) возвращает откалиброванный вектор (x,y,z) как tuple[float,float,float].
     """
 
-    def __init__(self, lam: float = 0.999, delta: float = 1e6):
+    def __init__(self, lam: float = 0.999, delta: float = 1e12):
         self.lam = float(lam)
         self.dim = 9
         self.theta = np.zeros((self.dim, 1), dtype=float)
@@ -17,12 +17,12 @@ class RLSMagCalibrator:
         self.y_value = -1.0
 
         # геометрические параметры (обновляются внутри update)
-        self.A: Optional[np.ndarray] = None
+        self.A: Optional[np.ndarray] = None # матрица квадратичных коэф
         self.b: Optional[np.ndarray] = None
         self.c: Optional[float] = None
-        self.center: Optional[np.ndarray] = None
-        self.sqrtA: Optional[np.ndarray] = None
-        self.r: Optional[float] = None
+        self.center: Optional[np.ndarray] = None # центр элипсоида
+        self.sqrtA: Optional[np.ndarray] = None # матрица масштабирования
+        self.r: Optional[float] = None # радиус эллипсоида
 
     def _phi_from_sample(self, m: np.ndarray) -> np.ndarray:
         x, y, z = m
@@ -62,13 +62,13 @@ class RLSMagCalibrator:
         a = np.vstack((self.theta.reshape((-1, 1)), np.array([[1.0]])))
         A = np.array(
             [
-                [a[0, 0], a[3, 0] / 2.0, a[4, 0] / 2.0],
-                [a[3, 0] / 2.0, a[1, 0], a[5, 0] / 2.0],
-                [a[4, 0] / 2.0, a[5, 0] / 2.0, a[2, 0]],
+                [a[0, 0], a[3, 0], a[4, 0]],
+                [a[3, 0], a[1, 0], a[5, 0]],
+                [a[4, 0], a[5, 0], a[2, 0]],
             ],
             dtype=float,
         )
-        b_vec = np.array([a[6, 0], a[7, 0], a[8, 0]], dtype=float).reshape((3, 1))
+        b_vec = 2.0 * np.array([a[6, 0], a[7, 0], a[8, 0]], dtype=float).reshape((3, 1))
         c = float(a[9, 0])
 
         # вычисление центра и прочего (с регуляризацией)
@@ -119,13 +119,14 @@ class RLSMagCalibrator:
             "r": self.r,
         }
 
+
 def process_file_batch(path: str, cal: RLSMagCalibrator, indices=(8, 9, 10)):
     """Reads file, counts lines, processes all samples sequentially and returns arrays."""
     if not os.path.exists(path):
         raise FileNotFoundError(f"File not found: {path}")
 
     print(f"Counting lines in {path}...")
-    with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
         total_lines = sum(1 for _ in fh)
     print(f"Total lines: {total_lines}")
 
@@ -134,7 +135,7 @@ def process_file_batch(path: str, cal: RLSMagCalibrator, indices=(8, 9, 10)):
     processed = 0
     skipped = 0
 
-    with open(path, 'r', encoding='utf-8', errors='ignore') as fh:
+    with open(path, "r", encoding="utf-8", errors="ignore") as fh:
         for i, line in enumerate(fh, 1):
             parts = line.strip().split()
             if len(parts) <= max(indices):
@@ -158,10 +159,14 @@ def process_file_batch(path: str, cal: RLSMagCalibrator, indices=(8, 9, 10)):
     params = cal.get_params()
 
     # compute batch-corrected points using final parameters
-    if params.get('sqrtA') is not None and params.get('center') is not None and params.get('r') is not None:
-        center = params['center']
-        sqrtA = params['sqrtA']
-        r = params['r']
+    if (
+        params.get("sqrtA") is not None
+        and params.get("center") is not None
+        and params.get("r") is not None
+    ):
+        center = params["center"]
+        sqrtA = params["sqrtA"]
+        r = params["r"]
         # apply: corrected = sqrtA @ (raw - center) / r
         if raw_arr.size:
             corrected_batch = (sqrtA @ (raw_arr - center).T).T
@@ -174,6 +179,7 @@ def process_file_batch(path: str, cal: RLSMagCalibrator, indices=(8, 9, 10)):
 
     print(f"Done. Processed: {processed}, skipped: {skipped}")
     return raw_arr, corrected_batch, params
+
 
 # Пример использования:
 if __name__ == "__main__":
