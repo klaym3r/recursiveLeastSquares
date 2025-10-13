@@ -1,6 +1,5 @@
-data.txt
-calibration_plot.html
-results.npz
+*.txt
+*.html
 
 
 # Byte-compiled / optimized / DLL files
