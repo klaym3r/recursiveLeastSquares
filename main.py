@@ -114,4 +114,4 @@ def main():
 
 # ---- Main execution (no argparse) ----
 if __name__ == "__main__":
-    main()
+    applyParamsToAnother()

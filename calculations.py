@@ -1,11 +1,13 @@
 from typing import Sequence, Optional, Tuple
 import numpy as np
-
 import os
 
 
-# ---- Ellipsoid fit / calibration (как раньше) ----
+# ---- Ellipsoid fit / calibration ----
 def fit_ellipsoid(raw: np.ndarray):
+    """
+    Подгоняет эллипсоид к набору 3D-точек.
+    """
     raw = np.asarray(raw, dtype=float)
     if raw.ndim != 2 or raw.shape[1] != 3:
         raise ValueError("raw must be (N,3) array")
@@ -53,8 +55,18 @@ def fit_ellipsoid(raw: np.ndarray):
     Qs = Q / (-Jc)
     evals, evecs = np.linalg.eigh(Qs)
     evals = np.clip(evals, 1e-12, None)
-    S = np.diag(np.sqrt(evals)).dot(evecs.T)
-    M = evecs.dot(np.diag(1.0 / np.sqrt(evals)))
+
+    # --- ИЗМЕНЕНИЕ ДЛЯ УДАЛЕНИЯ НАКЛОНА ---
+    # Преобразующая матрица S теперь будет только масштабировать данные вдоль
+    # главных осей эллипсоида, не вращая их для совмещения с осями координат.
+    # Это достигается через композицию: поворот в систему координат эллипсоида (evecs.T),
+    # масштабирование (D_sqrt), и обратный поворот (evecs), что в итоге сохраняет
+    # исходную ориентацию данных.
+    D_sqrt = np.diag(np.sqrt(evals))
+    D_inv_sqrt = np.diag(1.0 / np.sqrt(evals))
+    S = evecs.dot(D_sqrt).dot(evecs.T)
+    M = evecs.dot(D_inv_sqrt).dot(evecs.T)
+    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
     params = {
         "center": center,
@@ -70,6 +82,9 @@ def fit_ellipsoid(raw: np.ndarray):
 def apply_calibration(
     raw: np.ndarray, params: dict, scale_to: Optional[float] = 1.0
 ) -> np.ndarray:
+    """
+    Применяет параметры калибровки к сырым данным.
+    """
     raw = np.asarray(raw, dtype=float)
     center = params["center"]
     S = params["transform"]
