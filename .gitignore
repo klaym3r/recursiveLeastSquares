@@ -1,5 +1,6 @@
-# *.txt
-# *.html
+data/
+*.txt
+*.html
 
 
 # Byte-compiled / optimized / DLL files

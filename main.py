@@ -506,10 +506,85 @@ def apply_calibration_with_fallback(
         return apply_calibration(raw, params, scale_to=scale_to)
 
 
+def compute_affine_from_raw_file(
+    file_raw: str, cols=(8, 9, 10), min_points: int = 9, use_analytic_if_ellipsoid=True
+) -> Tuple[np.ndarray, np.ndarray, dict]:
+    """
+    1) загружает сырьё из file_raw (cols = 0-based),
+    2) подгоняет ellipsoid (или fallback),
+    3) возвращает A (3x3), b (3,), params (использованный словарь параметров или None).
+    Логика:
+     - если калибровка эллипсоидом и use_analytic_if_ellipsoid -> попробуем получить A,b аналитически:
+         A = alpha * S, b = -alpha * S @ center, где alpha = scale_to / mean_norm (scale_to=1)
+     - в остальных случаях (или чтобы получить робастную 3x3 аппроксимацию) делаем парный lstsq:
+         Phi X = Y  -> извлекаем A,b
+    """
+    if not os.path.isfile(file_raw):
+        raise FileNotFoundError(file_raw)
+
+    raw = load_magnetometer_raw(file_raw, cols=cols)
+    if raw.shape[0] < min_points:
+        raise ValueError(
+            f"Not enough points in {file_raw}: got {raw.shape[0]}, need >= {min_points}"
+        )
+
+    # Попробуем сначала эллипсоид
+    params = None
+    try:
+        params = fit_ellipsoid(raw)
+    except Exception:
+        params = None
+
+    # Если эллипсоид получен И мы хотим аналитический вывод — сделаем это
+    if params is not None and use_analytic_if_ellipsoid:
+        # Рассчитаем среднюю норму промежуточных точек, чтобы учесть масштабирование
+        S = params["transform"]  # 3x3
+        center = params["center"]  # (3,)
+        inter = (S.dot((raw - center).T)).T
+        mean_norm = np.mean(np.linalg.norm(inter, axis=1))
+        alpha = 1.0 if mean_norm == 0 else (1.0 / mean_norm)  # scale_to=1
+        A = alpha * S
+        b = -alpha * S.dot(center)
+        # Важно: если вы используете apply_calibration_with_fallback с другой логикой,
+        # этот аналитический A,b соответствует именно apply_calibration(..., scale_to=1.0)
+        return A, b, params
+
+    # Иначе — (fallback или хотим линейную аппроксимацию) — строим calibrated через apply_calibration_with_fallback,
+    # затем делаем lstsq по парам raw->calibrated чтобы получить A,b
+    calibrated = apply_calibration_with_fallback(
+        raw, ellipsoid_params=params, scale_to=1.0
+    )
+    # solve Phi X = Y
+    N = raw.shape[0]
+    Phi = np.hstack([raw, np.ones((N, 1), dtype=float)])  # (N,4)
+    X, *_ = np.linalg.lstsq(Phi, calibrated, rcond=None)  # X: (4,3)
+    # X rows: 0..2 => coefficients for features; row 3 => bias
+    A = X[:3, :].T  # (3,3) so that A @ x + b gives vector
+    b = X[3, :].T  # (3,)
+    return A, b, params
+
+
+def apply_affine_to_file(
+    input_file: str, A: np.ndarray, b: np.ndarray, cols=(8, 9, 10)
+) -> np.ndarray:
+    """
+    Считает из input_file колонки cols и применяет calibrated = A @ raw + b,
+    возвращает calibrated array (M,3).
+    """
+    raw2 = load_magnetometer_raw(input_file, cols=cols)
+    if raw2.size == 0:
+        return np.empty((0, 3), dtype=float)
+    # применяем построчно: calibrated_i = A @ x_i + b
+    # для скорости используем матричные операции:
+    cal2 = (raw2 @ A.T) + b  # (N,3)
+    return cal2
+
+
 # ---- Main execution (no argparse) ----
 if __name__ == "__main__":
     # === Настройки (изменяйте тут) ===
-    filepath = "data/data4.txt"  # <- укажите ваш файл здесь
+    file1 = "data/data4.txt"
+    file2 = "data/data3.txt"
     cols = (8, 9, 10)  # 0-based индексы колонок, которые интересуют
     scale_to = (
         1.0  # масштаб результата (1.0 => unit sphere). Можно поставить ≈50 для µT
@@ -519,31 +594,14 @@ if __name__ == "__main__":
     )
     # ==================================
 
-    if not os.path.isfile(filepath):
+    if not os.path.isfile(file1):
         raise FileNotFoundError(
-            f"Input file not found: '{filepath}'. Убедитесь, что путь указан верно."
+            f"Input file not found: '{file1}'. Убедитесь, что путь указан верно."
         )
 
-    print("Loading raw magnetometer data from file...")
-    raw = load_magnetometer_raw(filepath, cols=cols)
-    if raw.shape[0] == 0:
-        raise ValueError(
-            "No valid vectors were extracted from the file. Проверьте формат/индексы колонок."
-        )
-
-    print(
-        f"Loaded {raw.shape[0]} vectors. Fitting ellipsoid (this may take a moment)..."
-    )
-    params = None
-    try:
-        params = fit_ellipsoid(raw)
-    except Exception:
-        params = None
-    calibrated = apply_calibration_with_fallback(raw, params, scale_to=scale_to)
-
-    print("Fit complete.")
-    print("Center (hard-iron offset):", params["center"])
-    print("Eigenvalues (shape):", params["eigvals"])
+    A, B, params1 = compute_affine_from_raw_file(file1, cols=cols)
+    raw = load_magnetometer_raw(file2, cols=cols)
+    calibrated = apply_affine_to_file(file2, A, B, cols=cols)
 
     # Plot and save HTML (opens browser by default; change auto_open if нужно)
     plot_raw_vs_calibrated(
