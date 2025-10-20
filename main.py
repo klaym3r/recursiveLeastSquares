@@ -63,7 +63,53 @@ def applyParamsToAnother():
     )
 
 def buildPlot():
+    # === Настройки (изменяйте тут) ===
+    filepath = "data/data4.txt"  # <- укажите ваш файл здесь
+    cols = (8, 9, 10)  # 0-based индексы колонок, которые интересуют
+    max_plot_points = (
+        20000  # максимальное число точек для отрисовки (подвыборка при больших файлах)
+    )
+    # ==================================
 
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(
+            f"Input file not found: '{filepath}'. Убедитесь, что путь указан верно."
+        )
+
+    print("Loading raw magnetometer data from file...")
+    raw = load_magnetometer_raw(filepath, cols=cols)
+    if raw.shape[0] == 0:
+        raise ValueError(
+            "No valid vectors were extracted from the file. Проверьте формат/индексы колонок."
+        )
+
+    print(
+        f"Loaded {raw.shape[0]} vectors. Fitting ellipsoid (this may take a moment)..."
+    )
+    params = None
+    try:
+        params = fit_ellipsoid(raw)
+    except Exception:
+        params = None
+    calibrated = apply_calibration_with_fallback(raw, params)
+
+    print("Fit complete.")
+    print("Center (hard-iron offset):", params["center"])
+    print("Eigenvalues (shape):", params["eigvals"])
+
+    # Plot and save HTML (opens browser by default; change auto_open if нужно)
+    plot_raw_vs_calibrated(
+        raw,
+        calibrated,
+        out_html="mag_raw_vs_calibrated.html",
+        max_plot_points=max_plot_points,
+        auto_open=True,
+    )
+
+    # гистограмма расстояний (не открываем автоматически, чтобы не мешать)
+    distances, hist_fig = plot_distance_histogram(
+        calibrated=calibrated, out_html="hist_calibrated.html", auto_open=False
+    )
 
 def realTimeProcessing():
 
@@ -103,4 +149,4 @@ def realTimeProcessing():
 
 # ---- Main execution (no argparse) ----
 if __name__ == "__main__":
-    realTimeProcessing()
+    buildPlot()
