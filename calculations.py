@@ -56,17 +56,10 @@ def fit_ellipsoid(raw: np.ndarray):
     evals, evecs = np.linalg.eigh(Qs)
     evals = np.clip(evals, 1e-12, None)
 
-    # --- ИЗМЕНЕНИЕ ДЛЯ УДАЛЕНИЯ НАКЛОНА ---
-    # Преобразующая матрица S теперь будет только масштабировать данные вдоль
-    # главных осей эллипсоида, не вращая их для совмещения с осями координат.
-    # Это достигается через композицию: поворот в систему координат эллипсоида (evecs.T),
-    # масштабирование (D_sqrt), и обратный поворот (evecs), что в итоге сохраняет
-    # исходную ориентацию данных.
     D_sqrt = np.diag(np.sqrt(evals))
     D_inv_sqrt = np.diag(1.0 / np.sqrt(evals))
     S = evecs.dot(D_sqrt).dot(evecs.T)
     M = evecs.dot(D_inv_sqrt).dot(evecs.T)
-    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
     params = {
         "center": center,
@@ -79,21 +72,34 @@ def fit_ellipsoid(raw: np.ndarray):
     return params
 
 
-def apply_calibration(
-    raw: np.ndarray, params: dict, scale_to: Optional[float] = 1.0
-) -> np.ndarray:
+def apply_calibration(raw: np.ndarray, params: dict) -> np.ndarray:
     """
     Применяет параметры калибровки к сырым данным.
+    ИЗМЕНЕНО: Масштабирует итоговую сферу так, чтобы ее средний радиус
+    соответствовал средней норме исходных "сырых" векторов, а не 1.0.
     """
     raw = np.asarray(raw, dtype=float)
     center = params["center"]
     S = params["transform"]
+
+    # 1. Трансформация эллипсоида в сферу с центром в нуле
     cal = (S.dot((raw - center).T)).T
-    if scale_to is not None:
-        norms = np.linalg.norm(cal, axis=1)
-        mean_norm = np.mean(norms) if norms.size > 0 else 0.0
-        if mean_norm > 0:
-            cal = cal * (scale_to / mean_norm)
+
+    # 2. Расчет целевого масштаба на основе средней нормы (длины) векторов сырых данных
+    avg_raw_norm = np.mean(np.linalg.norm(raw, axis=1)) if raw.size > 0 else 0.0
+    if avg_raw_norm == 0.0:
+        return cal # Если сырые данные были нулевыми, нет смысла масштабировать
+
+    # 3. Масштабирование результата
+    # Вычисляем текущую среднюю норму трансформированных данных
+    current_norms = np.linalg.norm(cal, axis=1)
+    current_mean_norm = np.mean(current_norms) if current_norms.size > 0 else 0.0
+
+    # Масштабируем так, чтобы средняя норма стала равна средней норме сырых данных
+    if current_mean_norm > 0:
+        scale_factor = avg_raw_norm / current_mean_norm
+        cal = cal * scale_factor
+    
     return cal
 
 
@@ -196,96 +202,74 @@ def fit_circle_in_plane(raw: np.ndarray):
 def apply_calibration_with_fallback(
     raw: np.ndarray,
     ellipsoid_params: Optional[dict] = None,
-    scale_to: Optional[float] = 1.0,
     planar_thresh: float = 0.05,
 ):
     """
-    Универсальная функция калибровки:
-     - если данные 3D (неплоские) -> стандартный ellipsoid transform (apply_calibration).
-     - если данные почти плоские (малое отношение EV3/EV1 < planar_thresh) -> circle-in-plane fallback.
-    Возвращает calibrated (N,3) — откалиброванные 3D-векторы.
+    Универсальная функция калибровки.
+    ИЗМЕНЕНО: Целевой масштаб берется из средней нормы сырых данных.
     """
     raw = np.asarray(raw, dtype=float)
     evals, evecs, ratios = pca_diagnostics(raw)
     planar_ratio = evals[-1] / (evals[0] + 1e-15)
+
+    # Целевой масштаб - средняя норма (длина) векторов в сырых данных
+    target_scale = np.mean(np.linalg.norm(raw, axis=1)) if raw.size > 0 else 0.0
+    if target_scale == 0:
+        target_scale = 1.0 # Запасной вариант, если сырые данные нулевые
 
     if planar_ratio < planar_thresh:
         # planar: сделать 2D circle-fit и нормировать радиус
         try:
             circ = fit_circle_in_plane(raw)
         except Exception as e:
-            # если circle fit упал, fallback на ellipsoid (если есть params) или просто центрирование
             if ellipsoid_params is not None:
-                return apply_calibration(raw, ellipsoid_params, scale_to=scale_to)
+                return apply_calibration(raw, ellipsoid_params)
             else:
                 mean = raw.mean(axis=0)
                 return raw - mean
 
-        u = circ["plane_u"]
-        v = circ["plane_v"]
+        u, v = circ["plane_u"], circ["plane_v"]
         n = np.cross(u, v)
-        mean = circ["plane_origin"]
-        center3d = circ["center3d"]
-        radius = circ["radius"]
+        mean, center3d, radius = circ["plane_origin"], circ["center3d"], circ["radius"]
 
-        # Проекция на плоскость (2D)
         rel = raw - mean
-        coords2 = np.column_stack([rel.dot(u), rel.dot(v)])  # N x 2
-        # центр в 2D:
+        coords2 = np.column_stack([rel.dot(u), rel.dot(v)])
         center2 = np.array([np.dot(center3d - mean, u), np.dot(center3d - mean, v)])
 
-        # нормируем радиальную компоненту: (coords2 - center2) * (scale_to / radius)
-        if radius <= 0:
-            scale = 1.0
-        else:
-            scale = (scale_to / radius) if scale_to is not None else 1.0
+        scale = (target_scale / radius) if radius > 0 else 1.0
+        rel2_norm = (coords2 - center2[None, :]) * scale
 
-        rel2_norm = (coords2 - center2[None, :]) * scale  # N x 2
-
-        # восстанавливаем 3D для плоскости
         cal_plane3d = (
             mean[None, :] + np.outer(rel2_norm[:, 0], u) + np.outer(rel2_norm[:, 1], v)
         )
 
-        # перпендикулярная компонента (сохраняем вариацию, но центрируем)
-        perp = rel.dot(n)  # signed distances along normal
-        perp_mean = perp.mean()
-        perp_centered = (
-            perp - perp_mean
-        )  # оставляем как небольшое смещение вдоль нормали
+        perp = rel.dot(n)
+        perp_centered = perp - perp.mean()
         cal = cal_plane3d + np.outer(perp_centered, n)
 
-        # Дополнительно: если хочется, можно масштабировать так, чтобы средняя норма == scale_to:
-        if scale_to is not None:
-            norms = np.linalg.norm(cal, axis=1)
-            mean_norm = norms.mean() if norms.size > 0 else 0.0
-            if mean_norm > 0:
-                cal = cal * (scale_to / mean_norm)
+        # Финальное масштабирование для точного соответствия средней норме
+        norms = np.linalg.norm(cal, axis=1)
+        mean_norm = norms.mean() if norms.size > 0 else 0.0
+        if mean_norm > 0:
+            cal = cal * (target_scale / mean_norm)
 
         return cal
 
     else:
-        # не плоские -> используем полный ellipsoid (если нет params, попытка вызвать fit)
+        # не плоские -> используем полный ellipsoid
         if ellipsoid_params is None:
-            # попробуем подогнать эллипсоид прямо
             params = fit_ellipsoid(raw)
         else:
             params = ellipsoid_params
-        return apply_calibration(raw, params, scale_to=scale_to)
+        return apply_calibration(raw, params)
 
 
 def compute_affine_from_raw_file(
     file_raw: str, cols=(8, 9, 10), min_points: int = 9, use_analytic_if_ellipsoid=True
 ) -> Tuple[np.ndarray, np.ndarray, dict]:
     """
-    1) загружает сырьё из file_raw (cols = 0-based),
-    2) подгоняет ellipsoid (или fallback),
-    3) возвращает A (3x3), b (3,), params (использованный словарь параметров или None).
-    Логика:
-     - если калибровка эллипсоидом и use_analytic_if_ellipsoid -> попробуем получить A,b аналитически:
-         A = alpha * S, b = -alpha * S @ center, где alpha = scale_to / mean_norm (scale_to=1)
-     - в остальных случаях (или чтобы получить робастную 3x3 аппроксимацию) делаем парный lstsq:
-         Phi X = Y  -> извлекаем A,b
+    1) загружает сырьё, 2) подгоняет ellipsoid, 3) возвращает A, b, params.
+    ИЗМЕНЕНО: Аналитический расчет A, b теперь также использует масштаб сырых данных.
     """
     if not os.path.isfile(file_raw):
         raise FileNotFoundError(file_raw)
@@ -296,39 +280,38 @@ def compute_affine_from_raw_file(
             f"Not enough points in {file_raw}: got {raw.shape[0]}, need >= {min_points}"
         )
 
-    # Попробуем сначала эллипсоид
     params = None
     try:
         params = fit_ellipsoid(raw)
     except Exception:
         params = None
 
-    # Если эллипсоид получен И мы хотим аналитический вывод — сделаем это
     if params is not None and use_analytic_if_ellipsoid:
-        # Рассчитаем среднюю норму промежуточных точек, чтобы учесть масштабирование
-        S = params["transform"]  # 3x3
-        center = params["center"]  # (3,)
+        S = params["transform"]
+        center = params["center"]
+        
+        # Промежуточные данные (сфера с центром в нуле, но еще не отмасштабированная)
         inter = (S.dot((raw - center).T)).T
-        mean_norm = np.mean(np.linalg.norm(inter, axis=1))
-        alpha = 1.0 if mean_norm == 0 else (1.0 / mean_norm)  # scale_to=1
+        mean_inter_norm = np.mean(np.linalg.norm(inter, axis=1))
+        
+        # Целевой масштаб - средняя норма сырых данных
+        avg_raw_norm = np.mean(np.linalg.norm(raw, axis=1))
+        
+        # Рассчитываем коэффициент масштабирования
+        alpha = 1.0 if mean_inter_norm == 0 else (avg_raw_norm / mean_inter_norm)
+        
         A = alpha * S
         b = -alpha * S.dot(center)
-        # Важно: если вы используете apply_calibration_with_fallback с другой логикой,
-        # этот аналитический A,b соответствует именно apply_calibration(..., scale_to=1.0)
         return A, b, params
 
-    # Иначе — (fallback или хотим линейную аппроксимацию) — строим calibrated через apply_calibration_with_fallback,
-    # затем делаем lstsq по парам raw->calibrated чтобы получить A,b
-    calibrated = apply_calibration_with_fallback(
-        raw, ellipsoid_params=params, scale_to=1.0
-    )
-    # solve Phi X = Y
+    # Иначе — (fallback или хотим линейную аппроксимацию)
+    calibrated = apply_calibration_with_fallback(raw, ellipsoid_params=params)
+    
     N = raw.shape[0]
-    Phi = np.hstack([raw, np.ones((N, 1), dtype=float)])  # (N,4)
-    X, *_ = np.linalg.lstsq(Phi, calibrated, rcond=None)  # X: (4,3)
-    # X rows: 0..2 => coefficients for features; row 3 => bias
-    A = X[:3, :].T  # (3,3) so that A @ x + b gives vector
-    b = X[3, :].T  # (3,)
+    Phi = np.hstack([raw, np.ones((N, 1), dtype=float)])
+    X, *_ = np.linalg.lstsq(Phi, calibrated, rcond=None)
+    A = X[:3, :].T
+    b = X[3, :].T
     return A, b, params
 
 
@@ -336,13 +319,10 @@ def apply_affine_to_file(
     input_file: str, A: np.ndarray, b: np.ndarray, cols=(8, 9, 10)
 ) -> np.ndarray:
     """
-    Считает из input_file колонки cols и применяет calibrated = A @ raw + b,
-    возвращает calibrated array (M,3).
+    Считает из input_file колонки cols и применяет calibrated = A @ raw + b.
     """
     raw2 = load_magnetometer_raw(input_file, cols=cols)
     if raw2.size == 0:
         return np.empty((0, 3), dtype=float)
-    # применяем построчно: calibrated_i = A @ x_i + b
-    # для скорости используем матричные операции:
-    cal2 = (raw2 @ A.T) + b  # (N,3)
+    cal2 = (raw2 @ A.T) + b
     return cal2

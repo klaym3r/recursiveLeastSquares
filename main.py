@@ -14,7 +14,9 @@ mag_calib_plot.py
 """
 
 import os
+import numpy as np
 
+from MagnetometerCalibrator import MagnetometerCalibrator
 from calculations import (
     compute_affine_from_raw_file,
     load_magnetometer_raw,
@@ -60,58 +62,45 @@ def applyParamsToAnother():
         calibrated=calibrated, out_html="hist_calibrated.html", auto_open=False
     )
 
-def main():
-    # === Настройки (изменяйте тут) ===
-    filepath = "data/data4.txt"  # <- укажите ваш файл здесь
-    cols = (8, 9, 10)  # 0-based индексы колонок, которые интересуют
-    scale_to = (
-        1.0  # масштаб результата (1.0 => unit sphere). Можно поставить ≈50 для µT
-    )
-    max_plot_points = (
-        20000  # максимальное число точек для отрисовки (подвыборка при больших файлах)
-    )
-    # ==================================
+def buildPlot():
 
-    if not os.path.isfile(filepath):
-        raise FileNotFoundError(
-            f"Input file not found: '{filepath}'. Убедитесь, что путь указан верно."
-        )
 
-    print("Loading raw magnetometer data from file...")
-    raw = load_magnetometer_raw(filepath, cols=cols)
-    if raw.shape[0] == 0:
-        raise ValueError(
-            "No valid vectors were extracted from the file. Проверьте формат/индексы колонок."
-        )
+def realTimeProcessing():
 
-    print(
-        f"Loaded {raw.shape[0]} vectors. Fitting ellipsoid (this may take a moment)..."
-    )
-    params = None
+    calibration_data_file = "data/data4.txt"
+    calibrator = MagnetometerCalibrator()
+
+    calibrator.calibrate(calibration_data_file)
+
+    if calibrator.is_calibrated:
+        calibrator.save_calibration("mag_calib.npz")
+
+    print("\n" + "="*50 + "\n")
+
+
+    real_time_calibrator = MagnetometerCalibrator()
     try:
-        params = fit_ellipsoid(raw)
-    except Exception:
-        params = None
-    calibrated = apply_calibration_with_fallback(raw, params, scale_to=scale_to)
+        real_time_calibrator.load_calibration("mag_calib.npz")
+    except FileNotFoundError as e:
+        print(e)
+        print("Программа продолжит работу без калибровки.")
 
-    print("Fit complete.")
-    print("Center (hard-iron offset):", params["center"])
-    print("Eigenvalues (shape):", params["eigvals"])
+    print("\nСимуляция Real-Time коррекции:")
 
-    # Plot and save HTML (opens browser by default; change auto_open if нужно)
-    plot_raw_vs_calibrated(
-        raw,
-        calibrated,
-        out_html="mag_raw_vs_calibrated.html",
-        max_plot_points=max_plot_points,
-        auto_open=True,
-    )
+    while True:
+        data_input = input("x y z: ")
+        raw_xyz = np.array(list(map(float, data_input.split(" "))))
 
-    # гистограмма расстояний (не открываем автоматически, чтобы не мешать)
-    distances, hist_fig = plot_distance_histogram(
-        calibrated=calibrated, out_html="hist_calibrated.html", auto_open=False
-    )
+        # real_time_raw_data = [
+        #     np.array([10.5, -30.1, 55.2]),
+        #     np.array([25.0, -15.8, 40.7]),
+        #     np.array([-5.3, -45.6, 61.0]),
+        # ]
+
+        calibrated_xyz = real_time_calibrator.correct(raw_xyz)
+        print(f"    Сырые данные: {np.round(raw_xyz, 2)}")
+        print(f"    Откалиброванные: {np.round(calibrated_xyz, 2)}\n")
 
 # ---- Main execution (no argparse) ----
 if __name__ == "__main__":
-    applyParamsToAnother()
+    realTimeProcessing()
