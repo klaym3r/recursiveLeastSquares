@@ -210,6 +210,8 @@ def apply_calibration_with_fallback(
     """
     raw = np.asarray(raw, dtype=float)
     evals, evecs, ratios = pca_diagnostics(raw)
+
+    # отношение самой маленькой дисперсии к самой большой
     planar_ratio = evals[-1] / (evals[0] + 1e-15)
 
     # Целевой масштаб - средняя норма (длина) векторов в сырых данных
