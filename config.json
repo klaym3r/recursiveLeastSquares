@@ -1,0 +1,148 @@
+{
+  "FilePaths": {
+    "main_data_file": {
+      "value": "data/data6.txt",
+      "comment": "Основной файл с данными для анализа (используется в buildPlot)."
+    },
+    "comparison_file_1": {
+      "value": "data/data4.txt",
+      "comment": "Файл для расчета калибровки (используется в applyParamsToAnother)."
+    },
+    "comparison_file_2": {
+      "value": "data/data3.txt",
+      "comment": "Файл, к которому применяется калибровка от file_1 (в applyParamsToAnother)."
+    },
+    "realtime_initial_calib_file": {
+      "value": "data/data4.txt",
+      "comment": "Файл для первоначальной калибровки в режиме реального времени."
+    },
+    "realtime_calib_storage_file": {
+      "value": "mag_calib.npz",
+      "comment": "Файл .npz для сохранения/загрузки параметров калибровки (A и b)."
+    },
+    "realtime_temp_recalib_file": {
+      "value": "temp_recalib_data.txt",
+      "comment": "Временный файл для сохранения данных при рекалибровке в реальном времени."
+    },
+    "plot_output_html": {
+      "value": "mag_raw_vs_calibrated.html",
+      "comment": "Имя выходного HTML-файла для 3D-графиков."
+    },
+    "histogram_output_html": {
+      "value": "hist_calibrated.html",
+      "comment": "Имя выходного HTML-файла для гистограммы."
+    }
+  },
+  "DataLoading": {
+    "data_columns": {
+      "value": [
+        8,
+        9,
+        10
+      ],
+      "comment": "Индексы (0-based) колонок X, Y, Z в файлах с данными."
+    },
+    "file_encoding": {
+      "value": "utf-8",
+      "comment": "Кодировка для чтения файлов с данными."
+    },
+    "file_read_errors": {
+      "value": "ignore",
+      "comment": "Стратегия обработки ошибок кодировки (например, 'ignore', 'strict')."
+    },
+    "load_max_lines": {
+      "value": null,
+      "comment": "Максимальное кол-во строк для чтения из файла (null = читать все)."
+    },
+    "load_progress_interval": {
+      "value": 50000,
+      "comment": "Сообщать о прогрессе чтения каждые N строк."
+    }
+  },
+  "Plotting": {
+    "plot_max_points": {
+      "value": 20000,
+      "comment": "Максимальное кол-во точек для отображения на 3D-графике (для больших файлов)."
+    },
+    "plot_auto_open": {
+      "value": true,
+      "comment": "Автоматически открывать 3D-график в браузере."
+    },
+    "histogram_auto_open": {
+      "value": false,
+      "comment": "Автоматически открывать гистограмму в браузере."
+    },
+    "plot_marker_size": {
+      "value": 2.0,
+      "comment": "Размер точек на 3D-графиках."
+    },
+    "plot_3d_height": {
+      "value": 700,
+      "comment": "Высота (px) окна 3D-графика."
+    },
+    "plot_3d_width": {
+      "value": 1400,
+      "comment": "Ширина (px) окна 3D-графика."
+    },
+    "histogram_bins": {
+      "value": 60,
+      "comment": "Количество 'корзин' (столбцов) в гистограмме."
+    },
+    "histogram_show_stats": {
+      "value": true,
+      "comment": "Печатать ли статистику (mean, median, std) в консоль при построении гистограммы."
+    },
+    "histogram_height": {
+      "value": 500,
+      "comment": "Высота (px) окна гистограммы."
+    },
+    "histogram_width": {
+      "value": 800,
+      "comment": "Ширина (px) окна гистограммы."
+    }
+  },
+  "RealTime": {
+    "recalibration_point_threshold": {
+      "value": 9,
+      "comment": "Количество новых точек, которое нужно накопить перед запуском рекалибровки."
+    },
+    "realtime_exit_char": {
+      "value": "q",
+      "comment": "Символ для выхода из цикла realTimeProcessing."
+    }
+  },
+  "Algorithm": {
+    "calibrator_initial_scale": {
+      "value": 1.0,
+      "comment": "Начальный масштаб (усиление) для некалиброванного MagnetometerCalibrator."
+    },
+    "min_points_for_fit": {
+      "value": 9,
+      "comment": "Минимальное кол-во точек, необходимое для подгонки эллипсоида."
+    },
+    "ellipsoid_clip_min_eigenvalue": {
+      "value": 1e-12,
+      "comment": "Числовая стабильность: минимальное значение для собственных чисел (для избежания деления на 0)."
+    },
+    "pca_numerical_epsilon": {
+      "value": 1e-15,
+      "comment": "Числовая стабильность: малое число для избежания деления на 0 в PCA."
+    },
+    "lstsq_rcond": {
+      "value": null,
+      "comment": "Параметр 'rcond' для np.linalg.lstsq (null = использовать значение NumPy по умолчанию)."
+    },
+    "planar_detection_threshold": {
+      "value": 0.05,
+      "comment": "Порог (отношение min/max дисперсии) для определения 'плоских' данных в PCA."
+    },
+    "fallback_target_scale": {
+      "value": 1.0,
+      "comment": "Запасной целевой масштаб, если средняя норма сырых данных равна 0."
+    },
+    "use_analytic_transform": {
+      "value": true,
+      "comment": "Использовать аналитический расчет A и b из параметров эллипсоида (True), или линейную аппроксимацию lstsq (False)."
+    }
+  }
+}

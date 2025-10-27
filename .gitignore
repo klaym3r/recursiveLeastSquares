@@ -1,6 +1,7 @@
 data/
 *.txt
 *.html
+*.npz
 
 
 # Byte-compiled / optimized / DLL files

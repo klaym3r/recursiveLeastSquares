@@ -1,21 +1,13 @@
 """
-mag_calib_plot.py
+... (описание файла) ...
 
-Читает файл с большим количеством строк, извлекает колонки (по умолчанию 0-based 8,9,10),
-подгоняет эллипсоид к сырым значениям магнитометра и строит два 3D scatter:
-  - "Raw" (сырые точки)
-  - "Calibrated" (после преобразования, эллипсоид -> сфера)
-
-Также строит интерактивную гистограмму расстояний точек до центра сферы.
-
-Графики сохраняются в HTML (Plotly), который можно открыть в браузере.
-
-Настройте filepath прямо в __main__.
+Все настройки загружаются из config.json через модуль config.py
 """
 
 import os
 import numpy as np
 
+# Импортируем наши модули
 from MagnetometerCalibrator import MagnetometerCalibrator
 from calculations import (
     compute_affine_from_raw_file,
@@ -26,54 +18,57 @@ from calculations import (
 )
 from plot import plot_raw_vs_calibrated, plot_distance_histogram
 
+# Импортируем настройки из config.py
+try:
+    from config import CFG_FILE, CFG_LOAD, CFG_PLOT, CFG_RT
+except ImportError:
+    print("ОШИBКА: Не удалось импортировать настройки. Убедитесь, что config.py существует.")
+    exit(1)
+
+
 def applyParamsToAnother():
-    # === Настройки (изменяйте тут) ===
-    file1 = "data/data4.txt"
-    file2 = "data/data3.txt"
-    cols = (8, 9, 10)  # 0-based индексы колонок, которые интересуют
-    scale_to = (
-        1.0  # масштаб результата (1.0 => unit sphere). Можно поставить ≈50 для µT
-    )
-    max_plot_points = (
-        20000  # максимальное число точек для отрисовки (подвыборка при больших файлах)
-    )
-    # ==================================
+    # === Настройки (берутся из config.py) ===
+    file1 = CFG_FILE["comparison_file_1"]
+    file2 = CFG_FILE["comparison_file_2"]
+    cols = CFG_LOAD["data_columns"]
+    max_plot_points = CFG_PLOT["plot_max_points"]
+    # ========================================
 
     if not os.path.isfile(file1):
         raise FileNotFoundError(
-            f"Input file not found: '{file1}'. Убедитесь, что путь указан верно."
+            f"Input file not found: '{file1}'. Убедитесь, что путь указан верно в config.json."
         )
 
     A, B, params1 = compute_affine_from_raw_file(file1, cols=cols)
     raw = load_magnetometer_raw(file2, cols=cols)
     calibrated = apply_affine_to_file(file2, A, B, cols=cols)
 
-    # Plot and save HTML (opens browser by default; change auto_open if нужно)
+    # Plot and save HTML
     plot_raw_vs_calibrated(
         raw,
         calibrated,
-        out_html="mag_raw_vs_calibrated.html",
+        out_html=CFG_FILE["plot_output_html"],
         max_plot_points=max_plot_points,
-        auto_open=True,
+        auto_open=CFG_PLOT["plot_auto_open"],
     )
 
-    # гистограмма расстояний (не открываем автоматически, чтобы не мешать)
+    # гистограмма расстояний
     distances, hist_fig = plot_distance_histogram(
-        calibrated=calibrated, out_html="hist_calibrated.html", auto_open=False
+        calibrated=calibrated, 
+        out_html=CFG_FILE["histogram_output_html"], 
+        auto_open=CFG_PLOT["histogram_auto_open"]
     )
 
 def buildPlot():
-    # === Настройки (изменяйте тут) ===
-    filepath = "data/data6.txt"  # <- укажите ваш файл здесь
-    cols = (8, 9, 10)  # 0-based индексы колонок, которые интересуют
-    max_plot_points = (
-        20000  # максимальное число точек для отрисовки (подвыборка при больших файлах)
-    )
-    # ==================================
+    # === Настройки (берутся из config.py) ===
+    filepath = CFG_FILE["main_data_file"]
+    cols = CFG_LOAD["data_columns"]
+    max_plot_points = CFG_PLOT["plot_max_points"]
+    # ========================================
 
     if not os.path.isfile(filepath):
         raise FileNotFoundError(
-            f"Input file not found: '{filepath}'. Убедитесь, что путь указан верно."
+            f"Input file not found: '{filepath}'. Убедитесь, что путь указан верно в config.json."
         )
 
     print("Loading raw magnetometer data from file...")
@@ -94,36 +89,47 @@ def buildPlot():
     calibrated = apply_calibration_with_fallback(raw, params)
 
     print("Fit complete.")
-    print("Center (hard-iron offset):", params["center"])
-    print("Eigenvalues (shape):", params["eigvals"])
+    if params:
+        print("Center (hard-iron offset):", params["center"])
+        print("Eigenvalues (shape):", params["eigvals"])
 
-    # Plot and save HTML (opens browser by default; change auto_open if нужно)
+    # Plot and save HTML
     plot_raw_vs_calibrated(
         raw,
         calibrated,
-        out_html="mag_raw_vs_calibrated.html",
+        out_html=CFG_FILE["plot_output_html"],
         max_plot_points=max_plot_points,
-        auto_open=True,
+        auto_open=CFG_PLOT["plot_auto_open"],
     )
 
-    # гистограмма расстояний (не открываем автоматически, чтобы не мешать)
+    # гистограмма расстояний
     distances, hist_fig = plot_distance_histogram(
-        calibrated=calibrated, out_html="hist_calibrated.html", auto_open=False
+        calibrated=calibrated, 
+        out_html=CFG_FILE["histogram_output_html"], 
+        auto_open=CFG_PLOT["histogram_auto_open"]
     )
 
 def realTimeProcessing():
-    N_POINTS_FOR_RECALIBRATION = 9 
+    # === Настройки (берутся из config.py) ===
+    N_POINTS_FOR_RECALIBRATION = CFG_RT["recalibration_point_threshold"]
+    calibration_data_file = CFG_FILE["realtime_initial_calib_file"]
+    calib_storage_file = CFG_FILE["realtime_calib_storage_file"]
+    temp_calib_file = CFG_FILE["realtime_temp_recalib_file"]
+    exit_char = CFG_RT["realtime_exit_char"]
+    # ========================================
 
     # --- Начальная калибровка по файлу ---
-    calibration_data_file = "data/data4.txt"
     calibrator = MagnetometerCalibrator()
 
     print(f"Выполняется начальная калибровка по файлу: {calibration_data_file}...")
-    calibrator.calibrate(calibration_data_file)
+    try:
+        calibrator.calibrate(calibration_data_file)
+    except FileNotFoundError:
+        print(f"Файл {calibration_data_file} не найден, начальная калибровка пропущена.")
 
     if calibrator.is_calibrated:
-        calibrator.save_calibration("mag_calib.npz")
-        print("Начальная калибровка сохранена в 'mag_calib.npz'")
+        calibrator.save_calibration(calib_storage_file)
+        print(f"Начальная калибровка сохранена в '{calib_storage_file}'")
     else:
         print("Ошибка начальной калибровки. Файл не сохранен.")
 
@@ -132,24 +138,22 @@ def realTimeProcessing():
     # --- Настройка калибратора для реального времени ---
     real_time_calibrator = MagnetometerCalibrator()
     try:
-        real_time_calibrator.load_calibration("mag_calib.npz")
-        print("Загружена начальная калибровка 'mag_calib.npz'.")
-    except FileNotFoundError as e:
-        print(e)
+        real_time_calibrator.load_calibration(calib_storage_file)
+        print(f"Загружена начальная калибровка '{calib_storage_file}'.")
+    except FileNotFoundError:
+        print(f"Файл {calib_storage_file} не найден.")
         print("Программа продолжит работу без начальной калибровки.")
 
     print("\nСимуляция Real-Time коррекции и рекалибровки:")
 
     # --- Настройка для рекалибровки ---
-    # Задайте N - количество точек для сбора перед рекалибровкой
     real_time_data_buffer = [] # Буфер для сбора N точек
-    temp_calib_file = "temp_recalib_data.txt" # Файл для временных данных
 
     while True:
         try:
-            data_input = input(f"x y z (собрано {len(real_time_data_buffer)}/{N_POINTS_FOR_RECALIBRATION}, 'q' для выхода): ")
+            data_input = input(f"x y z (собрано {len(real_time_data_buffer)}/{N_POINTS_FOR_RECALIBRATION}, '{exit_char}' для выхода): ")
             
-            if data_input.lower() == 'q':
+            if data_input.lower() == exit_char:
                 print("Выход из программы.")
                 break
 
@@ -168,34 +172,41 @@ def realTimeProcessing():
                 print("\n" + "="*20 + " РЕКАЛИБРОВКА " + "="*20)
                 print(f"Накоплено {len(real_time_data_buffer)} точек. Выполняется рекалибровка...")
                 
-                # Конвертируем список массивов в 2D-массив
                 data_to_calibrate = np.array(real_time_data_buffer)
                 
                 # Сохраняем накопленные данные во временный файл
-                # (Предполагаем, что .calibrate() ожидает имя файла)
                 np.savetxt(temp_calib_file, data_to_calibrate, fmt='%.8f') 
 
                 # Выполняем калибровку по этому файлу
-                real_time_calibrator.calibrate(temp_calib_file)
+                # Используем колонки 0, 1, 2, т.к. мы сами создали этот файл
+                real_time_calibrator.calibrate(temp_calib_file, cols=(0, 1, 2))
 
                 if real_time_calibrator.is_calibrated:
                     print("Рекалибровка успешна. Обновленные параметры сохранены.")
-                    # Сохраняем обновленную калибровку
-                    real_time_calibrator.save_calibration("mag_calib.npz") 
+                    real_time_calibrator.save_calibration(calib_storage_file) 
                 else:
                     print("Ошибка рекалибровки. Будут использоваться старые параметры.")
                 
-                # 4. Очищаем буфер для сбора новой партии данных
                 real_time_data_buffer.clear()
                 print("Буфер очищен. Сбор новых данных...")
                 print("="*54 + "\n")
 
         except ValueError:
-            print("Ошибка: Введите 3 числа, разделенных пробелом, или 'q'.")
+            print(f"Ошибка: Введите 3 числа, разделенных пробелом, или '{exit_char}'.")
         except KeyboardInterrupt:
             print("\nВыход из программы (Ctrl+C).")
             break
 
-# ---- Main execution (no argparse) ----
+# ---- Main execution ----
 if __name__ == "__main__":
-    realTimeProcessing()
+
+    choice = input("1 - applyParamsToAnother()\n2 - buildPlot()\n3 - realTimeProcessing()\nВыбор: ")
+    match choice:
+        case '1':
+            applyParamsToAnother()
+        case '2':
+            buildPlot()
+        case '3':
+            realTimeProcessing()
+        case _:
+            pass
