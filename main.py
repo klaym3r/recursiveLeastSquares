@@ -112,41 +112,90 @@ def buildPlot():
     )
 
 def realTimeProcessing():
+    N_POINTS_FOR_RECALIBRATION = 9 
 
+    # --- Начальная калибровка по файлу ---
     calibration_data_file = "data/data4.txt"
     calibrator = MagnetometerCalibrator()
 
+    print(f"Выполняется начальная калибровка по файлу: {calibration_data_file}...")
     calibrator.calibrate(calibration_data_file)
 
     if calibrator.is_calibrated:
         calibrator.save_calibration("mag_calib.npz")
+        print("Начальная калибровка сохранена в 'mag_calib.npz'")
+    else:
+        print("Ошибка начальной калибровки. Файл не сохранен.")
 
     print("\n" + "="*50 + "\n")
 
-
+    # --- Настройка калибратора для реального времени ---
     real_time_calibrator = MagnetometerCalibrator()
     try:
         real_time_calibrator.load_calibration("mag_calib.npz")
+        print("Загружена начальная калибровка 'mag_calib.npz'.")
     except FileNotFoundError as e:
         print(e)
-        print("Программа продолжит работу без калибровки.")
+        print("Программа продолжит работу без начальной калибровки.")
 
-    print("\nСимуляция Real-Time коррекции:")
+    print("\nСимуляция Real-Time коррекции и рекалибровки:")
+
+    # --- Настройка для рекалибровки ---
+    # Задайте N - количество точек для сбора перед рекалибровкой
+    real_time_data_buffer = [] # Буфер для сбора N точек
+    temp_calib_file = "temp_recalib_data.txt" # Файл для временных данных
 
     while True:
-        data_input = input("x y z: ")
-        raw_xyz = np.array(list(map(float, data_input.split(" "))))
+        try:
+            data_input = input(f"x y z (собрано {len(real_time_data_buffer)}/{N_POINTS_FOR_RECALIBRATION}, 'q' для выхода): ")
+            
+            if data_input.lower() == 'q':
+                print("Выход из программы.")
+                break
 
-        # real_time_raw_data = [
-        #     np.array([10.5, -30.1, 55.2]),
-        #     np.array([25.0, -15.8, 40.7]),
-        #     np.array([-5.3, -45.6, 61.0]),
-        # ]
+            raw_xyz = np.array(list(map(float, data_input.split(" "))))
+            
+            # 1. Добавляем новые данные в буфер
+            real_time_data_buffer.append(raw_xyz)
 
-        calibrated_xyz = real_time_calibrator.correct(raw_xyz)
-        print(f"    Сырые данные: {np.round(raw_xyz, 2)}")
-        print(f"    Откалиброванные: {np.round(calibrated_xyz, 2)}\n")
+            # 2. Корректируем данные с использованием *текущей* калибровки
+            calibrated_xyz = real_time_calibrator.correct(raw_xyz)
+            print(f"    Сырые данные: {np.round(raw_xyz, 2)}")
+            print(f"    Откалиброванные: {np.round(calibrated_xyz, 2)}\n")
+
+            # 3. Проверяем, не пора ли делать рекалибровку
+            if len(real_time_data_buffer) >= N_POINTS_FOR_RECALIBRATION:
+                print("\n" + "="*20 + " РЕКАЛИБРОВКА " + "="*20)
+                print(f"Накоплено {len(real_time_data_buffer)} точек. Выполняется рекалибровка...")
+                
+                # Конвертируем список массивов в 2D-массив
+                data_to_calibrate = np.array(real_time_data_buffer)
+                
+                # Сохраняем накопленные данные во временный файл
+                # (Предполагаем, что .calibrate() ожидает имя файла)
+                np.savetxt(temp_calib_file, data_to_calibrate, fmt='%.8f') 
+
+                # Выполняем калибровку по этому файлу
+                real_time_calibrator.calibrate(temp_calib_file)
+
+                if real_time_calibrator.is_calibrated:
+                    print("Рекалибровка успешна. Обновленные параметры сохранены.")
+                    # Сохраняем обновленную калибровку
+                    real_time_calibrator.save_calibration("mag_calib.npz") 
+                else:
+                    print("Ошибка рекалибровки. Будут использоваться старые параметры.")
+                
+                # 4. Очищаем буфер для сбора новой партии данных
+                real_time_data_buffer.clear()
+                print("Буфер очищен. Сбор новых данных...")
+                print("="*54 + "\n")
+
+        except ValueError:
+            print("Ошибка: Введите 3 числа, разделенных пробелом, или 'q'.")
+        except KeyboardInterrupt:
+            print("\nВыход из программы (Ctrl+C).")
+            break
 
 # ---- Main execution (no argparse) ----
 if __name__ == "__main__":
-    buildPlot()
+    realTimeProcessing()
