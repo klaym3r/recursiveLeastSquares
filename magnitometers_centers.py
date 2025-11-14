@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 import itertools
 
 
-def read_nums(path: str) -> list[list[float]]:
+def read_nums(idx: int, path: str) -> list[list[float]]:
     """
     читает показания 4 магнитометров с файла
     возвращает двумерный массив чисел
@@ -13,7 +13,9 @@ def read_nums(path: str) -> list[list[float]]:
         for line in f:
             line_arr = line.split()[2:-5:]
             tmp = []
-            for i in range(6, len(line_arr), 12):
+            # 0 для акселерометров
+            # 6 для магнитометров
+            for i in range(idx, len(line_arr), 12):
                 for j in range(i, i + 3):
                     tmp.append(line_arr[j])
             nums.append(list(map(lambda x: float(x), tmp)))
@@ -146,7 +148,7 @@ def build_plot(points: list[list[float]], centroids, modified_centroids):
 
 
 if __name__ == "__main__":
-    nums = read_nums("data/data7.txt")
+    nums = read_nums(0, "data/data7.txt")
     points = process_coordinates(nums)
     points = list(map(lambda x: average_coords(x), points))
     groups = list(itertools.combinations(points, 3))
