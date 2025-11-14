@@ -1,5 +1,5 @@
 data/
-*.txt
+# *.txt
 *.html
 *.npz
 
