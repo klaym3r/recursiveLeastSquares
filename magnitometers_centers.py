@@ -3,16 +3,22 @@ import plotly.graph_objects as go
 import itertools
 
 
-def read_nums(idx: int, path: str) -> list[list[float]]:
+def read_nums(idx: int, path: str, start=0, to=float('inf')) -> list[list[float]]:
     """
     читает показания 4 магнитометров с файла
     возвращает двумерный массив чисел
     """
+    # with open(path, "r") as f_count:
+    #     n_total = sum(1 for line in f_count)
+    #
+    # start = n_total // 2
+    # to = start + 100
+
     with open(path, "r") as f:
         nums = []
         cnt = 0
         for line in f:
-            if cnt >= 10000:
+            if cnt >= start:
                 line_arr = line.split()[2:-5:]
                 tmp = []
                 # 0 для акселерометров
@@ -22,7 +28,7 @@ def read_nums(idx: int, path: str) -> list[list[float]]:
                         tmp.append(line_arr[j])
                 nums.append(list(map(lambda x: float(x), tmp)))
             cnt += 1
-            if cnt > 10100:
+            if cnt > to:
                 break
 
     return nums
@@ -256,7 +262,7 @@ def build_plot(
 
 
 def main(idx: int, path: str, plot=False, output_filename=None):
-    nums = read_nums(idx, path)
+    nums = read_nums(idx, path, 0, 100)
     points = process_coordinates(nums)
     points = list(map(lambda x: average_coords(x), points))
 
@@ -297,6 +303,6 @@ def main(idx: int, path: str, plot=False, output_filename=None):
 
 
 if __name__ == "__main__":
-    main(0, "data/data7.txt", plot=True, output_filename="axels.html")
-    main(3, "data/data7.txt", plot=True, output_filename="gyro.html")
-    main(6, "data/data7.txt", plot=True, output_filename="magnits.html")
+    main(0, "data/egor_z.txt", plot=True, output_filename="egor_100_z_axels.html")
+    main(3, "data/egor_z.txt", plot=True, output_filename="egor_100_z_gyro.html")
+    main(6, "data/egor_z.txt", plot=True, output_filename="egor_100_z_magnits.html")
